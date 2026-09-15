@@ -453,7 +453,7 @@ def main():
 
     import sys
     sys.path.insert(0, str(Path(__file__).parent))
-    from model_ode import DownscalingUNet
+    from src.models.model_ode import DownscalingUNet
 
     log.info(f"Loading: {args.checkpoint}")
     ckpt = torch.load(args.checkpoint, map_location=device, weights_only=False)

@@ -413,7 +413,7 @@ def main():
 
     import sys
     sys.path.insert(0, str(Path(__file__).parent))
-    from model_ode import DownscalingUNet
+    from src.models.model_ode import DownscalingUNet
 
     # Load model from Phase 2
     log.info(f"Loading Phase 2 checkpoint: {args.resume}")

@@ -1,17 +1,31 @@
 #!/usr/bin/env python3
 """
-Same as validate_cfm_ode.py but adds sequential progression plots
-showing the full recursive pipeline at each resolution step.
+Recursive ensemble downscaling with ODE-CFM, validated against PRISM.
+
+Ensemble generation: run the deterministic ODE from different x0 ~ N(0,I).
+Each initial noise vector produces a different sample from the learned
+conditional distribution. No score head or SDE needed.
+
+Pipeline:
+  1. Start from ERA5 25km for each test day
+  2. Recursively downscale: 25→12.5→6.25→3.125→1.5625 km
+  3. At each step, generate N ensemble members via ODE from different x0
+  4. Load PRISM 800m TIF, downsample to 1.5625km grid
+  5. Evaluate: CRPS, spread-skill, coverage, RMSE
+
+Note: model outputs are in mm/day (dataset scales ×1000).
+      PRISM is in mm/day after conversion from the TIF.
+      All comparisons are in mm/day.
 
 Usage:
-    python -u validate_cfm_ode_sequential.py \
+    python -u validate_cfm_ode.py \
         --checkpoint checkpoints/cfm_ode_v2/best_model_phase2.pt \
         --era5-dir data/era5_processed \
         --aef-dir data/aef_downsampled_by_year \
-        --prism-dir data/prism_tif_2025 \
-        --output-dir results/cfm_ode_sequential \
-        --n-ensemble 10 --n-days 5 --n-steps 50 \
-        --ensemble-batch 1
+        --prism-dir data/prism_tif_2018_2024 \
+        --output-dir results/cfm_ode \
+        --n-ensemble 20 \
+        --n-days 10
 """
 
 import argparse
@@ -92,6 +106,25 @@ def load_aef_as_tensor(aef_dir, t_idx, res_km, target_h, target_w, device):
 @torch.no_grad()
 def ode_integrate(model, coarse_up, alpha_c, alpha_f,
                   n_ensemble, n_steps=50, device="cuda"):
+    """
+    Euler integration of the flow ODE from t=0 (noise) to t=1 (residual).
+
+    dx/dt = v_θ(t, [coarse_up, x_t], α_c, α_f)
+
+    Each ensemble member starts from a different x0 ~ N(0, I).
+    The ODE is deterministic given x0, so diversity comes entirely
+    from the initial noise.
+
+    Args:
+        model: DownscalingUNet returning v_theta only
+        coarse_up: (1, 1, H, W) in mm/day
+        alpha_c, alpha_f: (1, D, H, W)
+        n_ensemble: number of members
+        n_steps: Euler steps
+
+    Returns:
+        residuals: (n_ensemble, 1, H, W) predicted residuals in mm/day
+    """
     B = n_ensemble
     _, _, H, W = coarse_up.shape
 
@@ -99,23 +132,29 @@ def ode_integrate(model, coarse_up, alpha_c, alpha_f,
     alpha_c_batch = alpha_c.expand(B, -1, -1, -1)
     alpha_f_batch = alpha_f.expand(B, -1, -1, -1)
 
+    # Each member starts from different noise
     x = torch.randn(B, 1, H, W, device=device)
+
     dt = 1.0 / n_steps
 
     for step in range(n_steps):
         t_val = step * dt
         t_batch = torch.full((B,), t_val, device=device)
-        x_input = torch.cat([coarse_up_batch, x], dim=1)
 
+        x_input = torch.cat([coarse_up_batch, x], dim=1)
+        
+        # Cast to bfloat16 for the forward pass - this allows the use of FlashAttention
         with torch.autocast(device_type='cuda', dtype=torch.bfloat16):
             v = model(t_batch, x_input, alpha_c_batch, alpha_f_batch)
 
+        # The ODE step remains in float32 for accuracy
         x = x + v.to(torch.float32) * dt
 
     return x
 
 
 def load_prism_day(prism_dir, date, target_lats, target_lons):
+    """Load PRISM TIF, crop to IL, regrid. Returns mm/day."""
     import rasterio
 
     date_str = str(date)[:10].replace("-", "")
@@ -123,7 +162,7 @@ def load_prism_day(prism_dir, date, target_lats, target_lons):
     tif_path = Path(prism_dir) / year / f"prism_ppt_us_30s_{date_str}.tif"
 
     if not tif_path.exists():
-        log.warning(f"  PRISM not found: {tif_path}")
+        log.warning(f"  PRISM tif file not found at: {str(tif_path)} ")
         return None
 
     with rasterio.open(tif_path) as src:
@@ -137,39 +176,92 @@ def load_prism_day(prism_dir, date, target_lats, target_lons):
 
     prism_data[prism_data < -900] = 0
 
+    # 1. Handle [0, 360] to [-180, 180] conversion if needed
     target_lons_shifted = np.where(target_lons > 180, target_lons - 360, target_lons)
+    
+    # 2. Force Western Hemisphere longitudes to be negative (fixes Degrees West vs East)
+    # If the array is showing [87.4, 91.6], this flips it to [-87.4, -91.6]
     target_lons_shifted = -np.abs(target_lons_shifted)
 
     lat_min, lat_max = target_lats.min() - 0.1, target_lats.max() + 0.1
+    # Note: Because they are negative, min() and max() behavior flips natively
     lon_min, lon_max = target_lons_shifted.min() - 0.1, target_lons_shifted.max() + 0.1
 
     lat_mask = (prism_lats >= lat_min) & (prism_lats <= lat_max)
     lon_mask = (prism_lons >= lon_min) & (prism_lons <= lon_max)
 
     if lat_mask.sum() == 0 or lon_mask.sum() == 0:
-        log.warning(f"  PRISM crop empty")
+        log.warning(f"  PRISM data sum = 0 (Bounds: Lat {lat_min:.2f} to {lat_max:.2f}, Lon {lon_min:.2f} to {lon_max:.2f})")
         return None
 
     lat_idx = np.where(lat_mask)[0]
     lon_idx = np.where(lon_mask)[0]
     cropped = prism_data[lat_idx[0]:lat_idx[-1]+1, lon_idx[0]:lon_idx[-1]+1]
 
+    # PRISM is already in mm/day — no conversion needed
     target_h, target_w = len(target_lats), len(target_lons)
     regridded = zoom(cropped, (target_h / cropped.shape[0], target_w / cropped.shape[1]),
                      order=1).astype(np.float32)
     return np.maximum(regridded, 0)
 
 
+def crps_ensemble(ensemble, observation):
+    N = len(ensemble)
+    mae = np.abs(ensemble - observation).mean()
+    sorted_ens = np.sort(ensemble)
+    diff_sum = sum((2 * i - N) * sorted_ens[i] for i in range(N))
+    spread = 2 * diff_sum / (N * N)
+    return mae - 0.5 * spread
+
+
+def crps_grid(ensemble_grids, observation_grid):
+    H, W = observation_grid.shape
+    crps_values = np.empty((H, W))
+    for i in range(H):
+        for j in range(W):
+            crps_values[i, j] = crps_ensemble(
+                ensemble_grids[:, i, j], observation_grid[i, j])
+    return crps_values.mean(), crps_values
+
+
+def ensemble_coverage(ensemble_grids, observation_grid, levels=(0.5, 0.8, 0.9)):
+    results = {}
+    for level in levels:
+        alpha = (1 - level) / 2
+        lo = np.quantile(ensemble_grids, alpha, axis=0)
+        hi = np.quantile(ensemble_grids, 1 - alpha, axis=0)
+        covered = ((observation_grid >= lo) & (observation_grid <= hi)).mean()
+        results[f"coverage_{int(level*100)}"] = float(covered)
+    return results
+
+
 def recursive_downscale(
-    era5_25km, year, model, aef_dir, era5_lats, era5_lons,
-    n_ensemble=20, n_steps=50, device="cuda", ensemble_batch=None,
+    era5_25km,       # (H25, W25) in meters/day
+    year,
+    model,
+    aef_dir,
+    era5_lats,
+    era5_lons,
+    n_ensemble=20,
+    n_steps=50,
+    device="cuda",
+    ensemble_batch=None,
 ):
+    """
+    Recursively downscale from 25km to 1.5625km.
+
+    Input is in meters/day (raw ERA5). Converted to mm/day for the model.
+    Output is in mm/day for comparison with PRISM.
+    """
     t_idx = year - AEF_YEAR_OFFSET
+
     if ensemble_batch is None:
         ensemble_batch = n_ensemble
 
+    # Convert ERA5 from meters to mm
     era5_mm = era5_25km * M_TO_MM
-    current_fields = np.stack([era5_mm] * n_ensemble)
+
+    current_fields = np.stack([era5_mm] * n_ensemble)  # (N, H, W) in mm/day
     current_lats = era5_lats.copy()
     current_lons = era5_lons.copy()
 
@@ -199,6 +291,7 @@ def recursive_downscale(
             batch_end = min(batch_start + ensemble_batch, n_ensemble)
             batch_size = batch_end - batch_start
 
+            # Bicubic upsample each member
             coarse_up_list = []
             for i in range(batch_start, batch_end):
                 cu = zoom(current_fields[i],
@@ -207,10 +300,13 @@ def recursive_downscale(
                 coarse_up_list.append(cu)
             coarse_up_np = np.stack(coarse_up_list)
 
+            # Model expects (B, 1, H, W) in mm/day
             coarse_up_t = torch.from_numpy(coarse_up_np).unsqueeze(1).to(device)
+
             alpha_c_batch = alpha_c.expand(batch_size, -1, -1, -1)
             alpha_f_batch = alpha_f.expand(batch_size, -1, -1, -1)
 
+            # ODE integration → residuals in mm/day
             residuals = ode_integrate(
                 model, coarse_up_t, alpha_c_batch, alpha_f_batch,
                 n_ensemble=batch_size, n_steps=n_steps, device=device,
@@ -219,6 +315,7 @@ def recursive_downscale(
             fine_t = coarse_up_t + residuals
             fine_np = fine_t.squeeze(1).cpu().numpy()
             fine_np = np.maximum(fine_np, 0)
+
             new_fields[batch_start:batch_end] = fine_np
 
         current_fields = new_fields
@@ -241,88 +338,44 @@ def recursive_downscale(
     return current_fields, current_lats, current_lons, intermediates
 
 
-# ── Progression plot ─────────────────────────────────────────────────────────
+def plot_ensemble(ensemble, bicubic_final, prism, crps_map,
+                  final_lats, final_lons, date_str, metrics, out_dir):
+    ens_mean = ensemble.mean(axis=0)
+    ens_std = ensemble.std(axis=0)
 
-def plot_progression(intermediates, prism, date_str, out_dir):
-    """
-    Row 1: Ensemble mean at each resolution + PRISM truth
-    Row 2: Ensemble spread at each resolution + error vs PRISM
+    fig, axes = plt.subplots(1, 5, figsize=(22, 4), constrained_layout=True)
 
-    Columns: Input(25km) | 12.5km | 6.25km | 3.125km | 1.5625km | PRISM
-    """
-    n_steps = len(intermediates)
-    has_prism = prism is not None
-    n_cols = n_steps + (1 if has_prism else 0)
+    vmin = min(prism.min(), ens_mean.min(), bicubic_final.min())
+    vmax = max(prism.max(), ens_mean.max(), bicubic_final.max())
+    extent = [final_lons[0], final_lons[-1], final_lats[-1], final_lats[0]]
 
-    fig, axes = plt.subplots(2, n_cols, figsize=(3.5 * n_cols, 7),
-                             constrained_layout=True)
+    axes[0].imshow(prism, cmap="YlGnBu", vmin=vmin, vmax=vmax,
+                   extent=extent, aspect="auto")
+    axes[0].set_title("PRISM (truth)", fontsize=9, fontweight="bold")
 
-    all_means = [inter["mean"] for inter in intermediates]
-    vmin = min(m.min() for m in all_means)
-    vmax = max(m.max() for m in all_means)
-    if has_prism:
-        vmin = min(vmin, prism.min())
-        vmax = max(vmax, prism.max())
-    if vmax <= vmin:
-        vmax = vmin + 0.1
+    axes[1].imshow(ens_mean, cmap="YlGnBu", vmin=vmin, vmax=vmax,
+                   extent=extent, aspect="auto")
+    axes[1].set_title(f"CFM Ens Mean\nRMSE={metrics['rmse_mean']:.3f} mm", fontsize=9)
 
-    for col, inter in enumerate(intermediates):
-        extent = [inter["lons"][0], inter["lons"][-1],
-                  inter["lats"][-1], inter["lats"][0]]
-        H, W = inter["shape"]
-        res = inter["res_km"]
-        step = inter["step"]
+    axes[2].imshow(bicubic_final, cmap="YlGnBu", vmin=vmin, vmax=vmax,
+                   extent=extent, aspect="auto")
+    axes[2].set_title(f"Bicubic\nRMSE={metrics['rmse_bicubic']:.3f} mm", fontsize=9)
 
-        label = f"ERA5 Input\n{res}km ({H}×{W})" if step == -1 else f"Step {step}\n{res}km ({H}×{W})"
+    axes[3].imshow(ens_std, cmap="Oranges", extent=extent, aspect="auto")
+    axes[3].set_title(f"Ens Spread\nmean={ens_std.mean():.3f} mm", fontsize=9)
 
-        axes[0, col].imshow(inter["mean"], cmap="YlGnBu",
-                            vmin=vmin, vmax=vmax,
-                            extent=extent, aspect="auto")
-        axes[0, col].set_title(label, fontsize=8)
-        axes[0, col].tick_params(labelsize=6)
+    axes[4].imshow(crps_map, cmap="Reds", extent=extent, aspect="auto")
+    axes[4].set_title(f"CRPS\nmean={metrics['crps']:.3f} mm", fontsize=9)
 
-        std = inter["std"]
-        axes[1, col].imshow(std, cmap="Oranges", extent=extent, aspect="auto")
-        if std.max() > 0:
-            axes[1, col].set_title(f"Spread\nμ={std.mean():.2f} mm", fontsize=8)
-        else:
-            axes[1, col].set_title("(no spread)", fontsize=8)
-        axes[1, col].tick_params(labelsize=6)
+    for ax in axes:
+        ax.set_xlabel("Lon")
+    axes[0].set_ylabel("Lat")
 
-    if has_prism:
-        col = n_steps
-        final = intermediates[-1]
-        extent = [final["lons"][0], final["lons"][-1],
-                  final["lats"][-1], final["lats"][0]]
-
-        axes[0, col].imshow(prism, cmap="YlGnBu", vmin=vmin, vmax=vmax,
-                            extent=extent, aspect="auto")
-        axes[0, col].set_title(f"PRISM Truth\n~0.8km ({prism.shape[0]}×{prism.shape[1]})",
-                               fontsize=8, fontweight="bold", color="darkgreen")
-        axes[0, col].tick_params(labelsize=6)
-
-        diff = final["mean"] - prism
-        rmse = np.sqrt((diff ** 2).mean())
-        abs_max = max(abs(diff.min()), abs(diff.max()), 0.01)
-        axes[1, col].imshow(diff, cmap="RdBu_r", vmin=-abs_max, vmax=abs_max,
-                            extent=extent, aspect="auto")
-        axes[1, col].set_title(f"Error vs PRISM\nRMSE={rmse:.2f} mm",
-                               fontsize=8, color="red")
-        axes[1, col].tick_params(labelsize=6)
-
-    axes[0, 0].set_ylabel("Ensemble Mean\n(mm/day)", fontsize=10, fontweight="bold")
-    axes[1, 0].set_ylabel("Ensemble Spread\n(mm/day)", fontsize=10, fontweight="bold")
-
-    fig.suptitle(f"Recursive Downscaling Pipeline — {date_str}",
-                 fontsize=13, fontweight="bold")
-
-    save_path = out_dir / f"progression_{date_str}.png"
-    fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    fig.suptitle(f"CFM ODE Ensemble — {date_str} (all mm/day)", fontsize=12)
+    fig.savefig(out_dir / f"cfm_ode_{date_str}.png", dpi=150, bbox_inches="tight")
     plt.close(fig)
-    log.info(f"  Saved {save_path.name}")
+    log.info(f"  Saved cfm_ode_{date_str}.png")
 
-
-# ── Main ─────────────────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser()
@@ -331,13 +384,11 @@ def main():
     parser.add_argument("--aef-dir", required=True)
     parser.add_argument("--prism-dir", required=True)
     parser.add_argument("--output-dir", required=True)
-    parser.add_argument("--n-ensemble", type=int, default=10)
-    parser.add_argument("--n-days", type=int, default=5)
+    parser.add_argument("--n-ensemble", type=int, default=20)
+    parser.add_argument("--n-days", type=int, default=10)
     parser.add_argument("--n-steps", type=int, default=50)
-    parser.add_argument("--ensemble-batch", type=int, default=1)
+    parser.add_argument("--ensemble-batch", type=int, default=None)
     parser.add_argument("--use-ema", action="store_true", default=True)
-    parser.add_argument("--rainy-only", action="store_true", default=False,
-                        help="Only sample days with domain-mean precip > 0.1 mm/day")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", type=str, default="cuda")
     args = parser.parse_args()
@@ -371,53 +422,52 @@ def main():
         model.load_state_dict(ckpt["model_state_dict"])
         log.info("  Loaded model weights")
     model.eval()
-    log.info(f"  Parameters: {sum(p.numel() for p in model.parameters()):,}")
 
-    # Load ERA5
+    n_params = sum(p.numel() for p in model.parameters())
+    log.info(f"  Parameters: {n_params:,}")
+    log.info(f"  Ensemble Batch size: {args.ensemble_batch}")
+
     era5_dir = Path(args.era5_dir)
     era5_lats = np.load(era5_dir / "era5_lats.npy")
     era5_lons = np.load(era5_dir / "era5_lons.npy")
-    A_fine = np.load(era5_dir / "pair_A_fine.npy")
+    A_fine = np.load(era5_dir / "pair_A_fine.npy")  # meters/day
     A_dates = np.load(era5_dir / "valid_times_A.npy")
     A_test_idx = np.load(era5_dir / "test_indices_A.npy")
 
     log.info(f"Test days: {len(A_test_idx)}")
 
-    # Filter to rainy days if requested
-    if args.rainy_only:
-        candidate_idx = []
-        for t in A_test_idx:
-            if A_fine[t].mean() > 0.0001:  # > 0.1 mm/day
-                candidate_idx.append(t)
-        candidate_idx = np.array(candidate_idx)
-        log.info(f"Rainy test days: {len(candidate_idx)} / {len(A_test_idx)}")
-    else:
-        candidate_idx = A_test_idx
-
     rng = np.random.RandomState(args.seed)
-    n_eval = min(args.n_days, len(candidate_idx))
-    eval_indices = rng.choice(candidate_idx, size=n_eval, replace=False)
+    n_eval = min(args.n_days, len(A_test_idx))
+    eval_indices = rng.choice(A_test_idx, size=n_eval, replace=False)
     eval_indices.sort()
+
+    # Run evaluation
+    all_metrics = {k: [] for k in ["crps", "rmse_mean", "rmse_bicubic",
+                                    "spread_skill", "coverage_50",
+                                    "coverage_80", "coverage_90"]}
+    per_day = []
 
     for day_i, t_idx in enumerate(eval_indices):
         date = A_dates[t_idx]
         date_str = str(date)[:10]
         year = int(date_str[:4])
-        log.info(f"Day {day_i+1}/{n_eval}: {date_str} "
-                 f"(domain mean={A_fine[t_idx].mean()*M_TO_MM:.2f} mm/day)")
+        log.info(f"Day {day_i+1}/{n_eval}: {date_str}")
+
+        era5_field = A_fine[t_idx]  # meters/day
 
         t0 = time.time()
         ensemble, final_lats, final_lons, intermediates = recursive_downscale(
-            A_fine[t_idx], year, model, args.aef_dir,
+            era5_field, year, model, args.aef_dir,
             era5_lats, era5_lons,
             n_ensemble=args.n_ensemble, n_steps=args.n_steps,
             device=device, ensemble_batch=args.ensemble_batch,
         )
         log.info(f"  Downscaled in {time.time()-t0:.1f}s, shape={ensemble.shape}")
 
+        # ensemble is in mm/day
         H_ens, W_ens = ensemble.shape[1], ensemble.shape[2]
 
-        # Load PRISM
+        # Load PRISM (mm/day)
         try:
             prism = load_prism_day(args.prism_dir, date, final_lats, final_lons)
         except Exception as e:
@@ -429,13 +479,59 @@ def main():
                          order=1).astype(np.float32)
             prism = np.maximum(prism, 0)
 
-        # Always plot progression (works with or without PRISM)
-        plot_progression(intermediates, prism, date_str, out_dir)
+        if prism is None:
+            log.warning(f"  No PRISM for {date_str}")
+            continue
 
-        if prism is not None:
-            ens_mean = ensemble.mean(axis=0)
-            rmse = np.sqrt(((ens_mean - prism) ** 2).mean())
-            log.info(f"  RMSE vs PRISM: {rmse:.3f} mm/day")
+        # All in mm/day now
+        ens_mean = ensemble.mean(axis=0)
+        ens_std = ensemble.std(axis=0)
+
+        rmse_mean = float(np.sqrt(((ens_mean - prism) ** 2).mean()))
+
+        # Bicubic baseline (meters → mm)
+        bicubic = zoom(era5_field,
+                       (H_ens / era5_field.shape[0], W_ens / era5_field.shape[1]),
+                       order=3).astype(np.float32)
+        bicubic = np.maximum(bicubic, 0) * M_TO_MM  # to mm/day
+        rmse_bicubic = float(np.sqrt(((bicubic - prism) ** 2).mean()))
+
+        mean_crps, crps_map = crps_grid(ensemble, prism)
+        cov = ensemble_coverage(ensemble, prism)
+
+        spread = float(ens_std.mean())
+        skill = float(np.abs(ens_mean - prism).mean())
+        ss = spread / (skill + 1e-10)
+
+        day_metrics = {
+            "rmse_mean": rmse_mean, "rmse_bicubic": rmse_bicubic,
+            "crps": float(mean_crps), "spread_skill": ss, **cov,
+        }
+
+        log.info(f"  RMSE(ens)={rmse_mean:.3f}, RMSE(bic)={rmse_bicubic:.3f}, "
+                 f"CRPS={mean_crps:.3f}, S/S={ss:.3f}")
+        log.info(f"  Coverage: " + ", ".join(f"{k}={v:.3f}" for k, v in cov.items()))
+
+        for k, v in day_metrics.items():
+            if k in all_metrics:
+                all_metrics[k].append(v)
+        per_day.append({"date": date_str, **day_metrics})
+
+        if day_i < 5:
+            plot_ensemble(ensemble, bicubic, prism, crps_map,
+                          final_lats, final_lons, date_str, day_metrics, out_dir)
+
+    # Aggregate
+    log.info("=" * 60)
+    log.info("AGGREGATE (all mm/day)")
+    results = {"per_day": per_day}
+    for k, vals in all_metrics.items():
+        if vals:
+            results[k] = {"mean": float(np.mean(vals)), "std": float(np.std(vals))}
+            log.info(f"  {k}: {results[k]['mean']:.4f} ± {results[k]['std']:.4f}")
+
+    with open(out_dir / "results.json", "w") as f:
+        json.dump(results, f, indent=2)
 
     log.info(f"Total: {time.time()-t_start:.0f}s")
     log.info(f"Saved: {out_dir}")

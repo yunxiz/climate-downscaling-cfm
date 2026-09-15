@@ -2,11 +2,12 @@
 """
 Training script for OT-CFM precipitation downscaling.
 
+Simplified from SF2M:
   - No score head or score loss (removed the unstable ~5800 loss term)
   - Uses ConditionalFlowMatcher (I-CFM) to preserve paired conditioning
-  - OT-CFM was breaking the (x0, x1) conditioning alignment
+  - OT-CFM was breaking the (x0, x1) ↔ conditioning alignment
   - Ensemble generation at inference via different x0 initializations
-  - ~1.5M parameters (was 33M)
+  - 3M parameters (was 33M)
 
 Phase 1: Multi-scale generalization
   - Losses: flow matching + cycle-consistency + spectral PSD
@@ -17,7 +18,7 @@ Phase 2: Rollout robustness
   - AEF projections frozen
 
 Usage:
-    python -u train_cfm_ode.py \
+    python -u train_cfm_ode_v3.py \
         --era5-dir data/era5_processed \
         --aef-dir data/aef_downsampled_by_year \
         --output-dir checkpoints/cfm \
@@ -48,12 +49,23 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 
-def cycle_consistency_loss(x_fine_hat, x_coarse_up):
-    H_c = max(1, x_coarse_up.shape[2] // 2)
-    W_c = max(1, x_coarse_up.shape[3] // 2)
-    x_coarse_proxy = F.adaptive_avg_pool2d(x_coarse_up, (H_c, W_c))
+# ══════════════════════════════════════════════════════════════════════════════
+# Auxiliary losses
+# ══════════════════════════════════════════════════════════════════════════════
+
+def cycle_consistency_loss(x_fine_hat, x_coarse):
+    """
+    Physical constraint: pooling the fine prediction back to the original
+    coarse resolution should recover the original coarse field.
+
+    x_fine_hat: (B, 1, H_fine, W_fine) — predicted fine-resolution field
+    x_coarse:   (B, 1, H_coarse, W_coarse) — original coarse field (NOT upsampled)
+
+    The pool target size is the coarse grid dimensions.
+    """
+    H_c, W_c = x_coarse.shape[2], x_coarse.shape[3]
     fine_pooled = F.adaptive_avg_pool2d(x_fine_hat, (H_c, W_c))
-    return (fine_pooled - x_coarse_proxy).abs().mean()
+    return ((fine_pooled - x_coarse) ** 2).mean()
 
 
 def spectral_psd_loss(r_hat, r_target):
@@ -67,6 +79,10 @@ def spectral_psd_loss(r_hat, r_target):
     subgrid_start = H_freq // 4
     return ((log_psd_hat[subgrid_start:] - log_psd_tgt[subgrid_start:]) ** 2).mean()
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Helpers
+# ══════════════════════════════════════════════════════════════════════════════
 
 def pad_t_like_x(t, x):
     return t.view(-1, *([1] * (x.ndim - 1)))
@@ -82,7 +98,12 @@ def update_ema(ema_model, model, decay=0.9999):
         ema_p.data.mul_(decay).add_(p.data, alpha=1 - decay)
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Training steps
+# ══════════════════════════════════════════════════════════════════════════════
+
 def train_step_phase1(model, batch, fm, device, epoch):
+    x_coarse = batch["x_coarse"].to(device)
     x_coarse_up = batch["x_coarse_up"].to(device)
     residual = batch["residual"].to(device)
     alpha_c = batch["alpha_coarse"].to(device)
@@ -103,10 +124,10 @@ def train_step_phase1(model, batch, fm, device, epoch):
     # Flow matching loss
     L_flow = ((v_pred - ut) ** 2).mean()
 
-    # Cycle-consistency
+    # Cycle-consistency: pool predicted fine back to coarse, compare to original coarse
     r_hat = estimate_x1_from_flow(xt, v_pred, t)
     x_fine_hat = x_coarse_up + r_hat
-    L_cycle = cycle_consistency_loss(x_fine_hat, x_coarse_up)
+    L_cycle = cycle_consistency_loss(x_fine_hat, x_coarse)
 
     # Spectral PSD (from epoch 5)
     if epoch >= 5:
@@ -127,59 +148,93 @@ def train_step_phase1(model, batch, fm, device, epoch):
     return loss, metrics
 
 
-def train_step_phase2(model, batch, fm, device):
-    x_coarse_up = batch["x_coarse_up"].to(device)
-    residual = batch["residual"].to(device)
-    alpha_c = batch["alpha_coarse"].to(device)
-    alpha_f = batch["alpha_fine"].to(device)
+def train_step_phase2(model, batch_A, batch_B, fm, device):
+    """
+    Phase 2: 2-step rollout using Pair A (50→25km) → Pair B (25→12.5km).
 
-    B = x_coarse_up.shape[0]
-    x0 = torch.randn_like(residual)
-    x1 = residual
+    Step 1: Model predicts residual at 25km (Pair A), reconstructs x_25km_hat.
+    Step 2: Uses x_25km_hat as input, bicubic upsamples to 12.5km grid,
+            model predicts residual at 12.5km.
+    Rollout loss: pool x_12.5km_hat back to 50km, compare to original x_50km.
 
-    t, xt, ut = fm.sample_location_and_conditional_flow(
-        x0.flatten(1), x1.flatten(1)
+    Gradients flow through both steps for full rollout training.
+    """
+    # Pair A data (50→25km)
+    x_coarse_A = batch_A["x_coarse"].to(device)       # (B, 1, H_50, W_50) original 50km
+    x_coarse_up_A = batch_A["x_coarse_up"].to(device)  # (B, 1, H_25, W_25) upsampled
+    residual_A = batch_A["residual"].to(device)         # (B, 1, H_25, W_25)
+    alpha_c_A = batch_A["alpha_coarse"].to(device)
+    alpha_f_A = batch_A["alpha_fine"].to(device)
+
+    # Pair B data (25→12.5km) — for AEF conditioning at step 2
+    alpha_c_B = batch_B["alpha_coarse"].to(device)
+    alpha_f_B = batch_B["alpha_fine"].to(device)
+    x_coarse_B = batch_B["x_coarse"].to(device)       # (B, 1, H_25, W_25) = Pair A fine
+    residual_B = batch_B["residual"].to(device)
+
+    B = x_coarse_up_A.shape[0]
+
+    # ── Step 1: Flow matching on Pair A ──────────────────────────────────
+    x0_A = torch.randn_like(residual_A)
+    t_A, xt_A, ut_A = fm.sample_location_and_conditional_flow(
+        x0_A.flatten(1), residual_A.flatten(1)
     )
-    xt = xt.view_as(x0)
-    ut = ut.view_as(x0)
+    xt_A = xt_A.view_as(x0_A)
+    ut_A = ut_A.view_as(x0_A)
 
-    x_input = torch.cat([x_coarse_up, xt], dim=1)
-    v_pred = model(t, x_input, alpha_c, alpha_f)
+    x_input_A = torch.cat([x_coarse_up_A, xt_A], dim=1)
+    v_pred_A = model(t_A, x_input_A, alpha_c_A, alpha_f_A)
 
-    L_flow = ((v_pred - ut) ** 2).mean()
+    L_flow_A = ((v_pred_A - ut_A) ** 2).mean()
 
-    r_hat = estimate_x1_from_flow(xt, v_pred, t)
-    x_fine_hat = x_coarse_up + r_hat
-    L_cycle = cycle_consistency_loss(x_fine_hat, x_coarse_up)
-    L_psd = spectral_psd_loss(r_hat, residual)
+    # Reconstruct step 1 output
+    r_hat_A = estimate_x1_from_flow(xt_A, v_pred_A, t_A)
+    x_25km_hat = x_coarse_up_A + r_hat_A
 
-    # Rollout: predicted fine → bicubic 2x → predict again → pool back
-    # Use no_grad for the rollout forward pass to save memory.
-    # The rollout loss only regularizes the step-1 output via x_fine_hat.
-    with torch.no_grad():
-        x_step2_coarse = x_fine_hat.detach()
-        H2 = x_step2_coarse.shape[2] * 2
-        W2 = x_step2_coarse.shape[3] * 2
-        x_step2_coarse_up = F.interpolate(
-            x_step2_coarse, size=(H2, W2), mode="bicubic", align_corners=False
-        )
+    # Cycle loss step 1: pool x_25km_hat back to 50km, compare to x_50km
+    L_cycle_A = cycle_consistency_loss(x_25km_hat, x_coarse_A)
 
-        z2 = torch.randn(B, 1, H2, W2, device=device)
-        t2 = torch.ones(B, device=device) * 0.99  # near t=1 to get x1 estimate
+    # PSD step 1
+    L_psd_A = spectral_psd_loss(r_hat_A, residual_A)
 
-        alpha_c2 = F.interpolate(alpha_c, size=(H2, W2), mode="bilinear", align_corners=False)
-        alpha_f2 = F.interpolate(alpha_f, size=(H2, W2), mode="bilinear", align_corners=False)
+    # ── Step 2: Rollout — use step 1 output as input to step 2 ──────────
+    # Bicubic upsample step 1 output to 12.5km grid
+    H_B, W_B = alpha_c_B.shape[2], alpha_c_B.shape[3]
+    x_25km_up = F.interpolate(x_25km_hat, size=(H_B, W_B),
+                               mode="bicubic", align_corners=False)
 
-        x_input2 = torch.cat([x_step2_coarse_up, z2], dim=1)
-        v2_pred = model(t2, x_input2, alpha_c2, alpha_f2)
-        r2_hat = estimate_x1_from_flow(z2, v2_pred, t2)
-        x_fine2_hat = x_step2_coarse_up + r2_hat
+    # Flow matching on step 2
+    x0_B = torch.randn(B, 1, H_B, W_B, device=device)
+    t_B, xt_B, ut_B = fm.sample_location_and_conditional_flow(
+        x0_B.flatten(1), residual_B.flatten(1)
+    )
+    xt_B = xt_B.view_as(x0_B)
+    ut_B = ut_B.view_as(x0_B)
 
-    H_c = max(1, x_coarse_up.shape[2] // 2)
-    W_c = max(1, x_coarse_up.shape[3] // 2)
-    x_coarse_proxy = F.adaptive_avg_pool2d(x_coarse_up, (H_c, W_c))
-    x_repooled = F.adaptive_avg_pool2d(x_fine2_hat, (H_c, W_c))
-    L_rollout = (x_repooled - x_coarse_proxy).abs().mean()
+    x_input_B = torch.cat([x_25km_up, xt_B], dim=1)
+    v_pred_B = model(t_B, x_input_B, alpha_c_B, alpha_f_B)
+
+    L_flow_B = ((v_pred_B - ut_B) ** 2).mean()
+
+    # Reconstruct step 2 output
+    r_hat_B = estimate_x1_from_flow(xt_B, v_pred_B, t_B)
+    x_12km_hat = x_25km_up + r_hat_B
+
+    # Cycle loss step 2: pool x_12.5km_hat back to 25km, compare to x_25km (Pair B coarse)
+    L_cycle_B = cycle_consistency_loss(x_12km_hat, x_coarse_B)
+
+    # PSD step 2
+    L_psd_B = spectral_psd_loss(r_hat_B, residual_B)
+
+    # ── Rollout consistency: pool x_12.5km_hat all the way back to 50km ──
+    H_50, W_50 = x_coarse_A.shape[2], x_coarse_A.shape[3]
+    x_repooled = F.adaptive_avg_pool2d(x_12km_hat, (H_50, W_50))
+    L_rollout = ((x_repooled - x_coarse_A) ** 2).mean()
+
+    # ── Combined loss ────────────────────────────────────────────────────
+    L_flow = (L_flow_A + L_flow_B) / 2
+    L_cycle = (L_cycle_A + L_cycle_B) / 2
+    L_psd = (L_psd_A + L_psd_B) / 2
 
     loss = L_flow + 0.8 * L_cycle + 0.4 * L_psd + 0.1 * L_rollout
 
@@ -192,6 +247,10 @@ def train_step_phase2(model, batch, fm, device):
     }
     return loss, metrics
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Validation
+# ══════════════════════════════════════════════════════════════════════════════
 
 @torch.no_grad()
 def validate(model, loader, fm, device):
@@ -219,6 +278,10 @@ def validate(model, loader, fm, device):
     model.train()
     return total_loss / max(n, 1)
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Training loops
+# ══════════════════════════════════════════════════════════════════════════════
 
 def train_phase1(model, loaders, fm, optimizer, scheduler, device, args):
     from dataset import InterleavedPairIterator
@@ -319,8 +382,7 @@ def train_phase1(model, loaders, fm, optimizer, scheduler, device, args):
 
 
 def train_phase2(model, ema_model, loaders, fm, optimizer, device, args):
-    from dataset import InterleavedPairIterator
-
+    """Phase 2: 2-step rollout with paired Pair A + Pair B batches."""
     out_dir = Path(args.output_dir)
 
     history_path = out_dir / "training_history.json"
@@ -340,12 +402,12 @@ def train_phase2(model, ema_model, loaders, fm, optimizer, device, args):
         model.train()
         t_epoch = time.time()
 
-        train_iter = InterleavedPairIterator(loaders["train_A"], loaders["train_B"])
+        # Iterate over paired A+B batches (same day, different scales)
         epoch_metrics = {}
         n_batches = 0
 
-        for batch in train_iter:
-            loss, metrics = train_step_phase2(model, batch, fm, device)
+        for batch_A, batch_B in zip(loaders["train_A"], loaders["train_B"]):
+            loss, metrics = train_step_phase2(model, batch_A, batch_B, fm, device)
 
             optimizer.zero_grad()
             loss.backward()
@@ -384,6 +446,7 @@ def train_phase2(model, ema_model, loaders, fm, optimizer, device, args):
         log.info(
             f"Phase2 Epoch {epoch+1}/{args.phase2_epochs} ({elapsed:.0f}s) — "
             f"flow={epoch_metrics['flow']:.6f} "
+            f"cycle={epoch_metrics['cycle']:.6f} "
             f"rollout={epoch_metrics.get('rollout', 0):.6f} "
             f"total={epoch_metrics['total']:.6f} "
             f"val={val_loss:.6f}"
@@ -407,6 +470,10 @@ def train_phase2(model, ema_model, loaders, fm, optimizer, device, args):
 
     return model, ema_model
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Main
+# ══════════════════════════════════════════════════════════════════════════════
 
 def main():
     parser = argparse.ArgumentParser(
@@ -435,8 +502,8 @@ def main():
 
     import sys
     sys.path.insert(0, str(Path(__file__).parent))
-    from dataset import build_datasets, build_paired_dataloaders
-    from model_ode import DownscalingUNet
+    from src.dataset_ode_v3 import build_datasets, build_paired_dataloaders
+    from src.models.model_ode import DownscalingUNet
 
     # Build datasets
     log.info("Building datasets...")
