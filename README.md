@@ -89,7 +89,7 @@ climate-downscaling-cfm/
 ├── src/                # model, training loops, inference
 ├── scripts/            # data preprocessing pipeline
 ├── configs/            # experiment / training configs
-├── figures/            # result figures used in this README
+├── figures/            # some example result figures
 ├── docs/               # final report PDF + slides
 ├── requirements.txt
 └── README.md
