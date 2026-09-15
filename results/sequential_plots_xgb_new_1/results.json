@@ -1,0 +1,610 @@
+{
+  "model": "XGBoost + AEF",
+  "checkpoint": "results/baselines/xgb_with_aef.json",
+  "n_ensemble": 40,
+  "rain_threshold_mm": 0.1,
+  "aggregate": {
+    "both_rain": {
+      "n_days": 10,
+      "rmse_mean": {
+        "mean": 9.585131895542144,
+        "std": 7.359803091016177,
+        "min": 1.7811485528945923,
+        "max": 25.973752975463867
+      },
+      "rmse_bicubic": {
+        "mean": 9.749053299427032,
+        "std": 7.464841617471587,
+        "min": 1.7629445791244507,
+        "max": 26.231922149658203
+      },
+      "crps": {
+        "mean": 5.565657726851101,
+        "std": 5.776828557678575,
+        "min": 0.47700456943167335,
+        "max": 17.565776671871127
+      },
+      "spread_skill": {
+        "mean": 0.4142402201382753,
+        "std": 0.3260190688765088,
+        "min": 0.06183250558933551,
+        "max": 1.1163506823419975
+      },
+      "coverage_50": {
+        "mean": 0.054516664002557544,
+        "std": 0.030441530453557453,
+        "min": 0.013247282608695652,
+        "max": 0.11049392583120204
+      },
+      "coverage_80": {
+        "mean": 0.3422104779411765,
+        "std": 0.14439595660639873,
+        "min": 0.04176990089514066,
+        "max": 0.49107856457800514
+      },
+      "coverage_90": {
+        "mean": 0.5185132273017903,
+        "std": 0.22331878275788442,
+        "min": 0.05622602301790281,
+        "max": 0.7936480978260869
+      }
+    },
+    "era5_only": {
+      "n_days": 10,
+      "rmse_mean": {
+        "mean": 1.4714103579521178,
+        "std": 0.7575768291907411,
+        "min": 0.64997398853302,
+        "max": 2.921506404876709
+      },
+      "rmse_bicubic": {
+        "mean": 1.0477277010679245,
+        "std": 0.6537160824064486,
+        "min": 0.3283593952655792,
+        "max": 2.2616989612579346
+      },
+      "crps": {
+        "mean": 0.5045836512076074,
+        "std": 0.26616432943573576,
+        "min": 0.20675619209335303,
+        "max": 1.0387730107020736
+      },
+      "spread_skill": {
+        "mean": 1.3384150271765975,
+        "std": 0.21421661925329655,
+        "min": 1.0467839340793461,
+        "max": 1.6299960403054214
+      },
+      "coverage_50": {
+        "mean": 0.01125319693094629,
+        "std": 0.011530897415197578,
+        "min": 0.003236892583120205,
+        "max": 0.04182984335038363
+      },
+      "coverage_80": {
+        "mean": 0.3906809462915601,
+        "std": 0.10205424006417596,
+        "min": 0.2066216432225064,
+        "max": 0.518172554347826
+      },
+      "coverage_90": {
+        "mean": 0.6624240728900256,
+        "std": 0.12672043997186083,
+        "min": 0.4577805306905371,
+        "max": 0.8248980978260869
+      }
+    },
+    "prism_only": {
+      "n_days": 10,
+      "rmse_mean": {
+        "mean": 3.1865170121192934,
+        "std": 2.8436013647069402,
+        "min": 0.5515193939208984,
+        "max": 9.03936767578125
+      },
+      "rmse_bicubic": {
+        "mean": 3.2490918010473253,
+        "std": 2.912102820233779,
+        "min": 0.40923306345939636,
+        "max": 9.13504695892334
+      },
+      "crps": {
+        "mean": 1.1428502690035192,
+        "std": 1.0066164308728518,
+        "min": 0.19977198746000283,
+        "max": 3.443053469882788
+      },
+      "spread_skill": {
+        "mean": 0.9039185508492384,
+        "std": 0.5157474638322157,
+        "min": 0.2172631692397705,
+        "max": 1.6663776799598482
+      },
+      "coverage_50": {
+        "mean": 0.06293458280051152,
+        "std": 0.027430599537644488,
+        "min": 0.02973145780051151,
+        "max": 0.1081661604859335
+      },
+      "coverage_80": {
+        "mean": 0.5138107416879796,
+        "std": 0.057323632455164496,
+        "min": 0.4130135070332481,
+        "max": 0.5978560581841432
+      },
+      "coverage_90": {
+        "mean": 0.7676070971867007,
+        "std": 0.08443874160007239,
+        "min": 0.6042099584398977,
+        "max": 0.8830822410485933
+      }
+    },
+    "all": {
+      "n_days": 30,
+      "rmse_mean": {
+        "mean": 4.747686421871185,
+        "std": 5.756121564494472,
+        "min": 0.5515193939208984,
+        "max": 25.973752975463867
+      },
+      "rmse_bicubic": {
+        "mean": 4.681957600514094,
+        "std": 5.932052430348151,
+        "min": 0.3283593952655792,
+        "max": 26.231922149658203
+      },
+      "crps": {
+        "mean": 2.4043638823540756,
+        "std": 4.0681784854549825,
+        "min": 0.19977198746000283,
+        "max": 17.565776671871127
+      },
+      "spread_skill": {
+        "mean": 0.885524599388037,
+        "std": 0.5309518756731398,
+        "min": 0.06183250558933551,
+        "max": 1.6663776799598482
+      },
+      "coverage_50": {
+        "mean": 0.042901481244671774,
+        "std": 0.03341625198910143,
+        "min": 0.003236892583120205,
+        "max": 0.11049392583120204
+      },
+      "coverage_80": {
+        "mean": 0.4155673886402387,
+        "std": 0.12936200732228864,
+        "min": 0.04176990089514066,
+        "max": 0.5978560581841432
+      },
+      "coverage_90": {
+        "mean": 0.6495147991261722,
+        "std": 0.18648780277622673,
+        "min": 0.05622602301790281,
+        "max": 0.8830822410485933
+      }
+    }
+  },
+  "per_day": [
+    {
+      "date": "2025-01-09",
+      "category": "era5_only",
+      "era5_domain_mean_mm": 0.6337641477584839,
+      "prism_domain_mean_mm": 0.0008483492420054972,
+      "metrics_available": true,
+      "rmse_mean": 1.3333700895309448,
+      "rmse_bicubic": 0.912447988986969,
+      "crps": 0.5513324027854528,
+      "spread_skill": 1.2396739844438318,
+      "coverage_50": 0.004126039002557545,
+      "coverage_80": 0.2066216432225064,
+      "coverage_90": 0.4577805306905371
+    },
+    {
+      "date": "2025-02-07",
+      "category": "prism_only",
+      "era5_domain_mean_mm": 0.014266090467572212,
+      "prism_domain_mean_mm": 0.4779435098171234,
+      "metrics_available": true,
+      "rmse_mean": 1.722711205482483,
+      "rmse_bicubic": 1.7763336896896362,
+      "crps": 0.5154459793895484,
+      "spread_skill": 1.0204468100823827,
+      "coverage_50": 0.040521099744245524,
+      "coverage_80": 0.5675551470588235,
+      "coverage_90": 0.8374660326086957
+    },
+    {
+      "date": "2025-02-11",
+      "category": "prism_only",
+      "era5_domain_mean_mm": 0.03185174614191055,
+      "prism_domain_mean_mm": 2.038884162902832,
+      "metrics_available": true,
+      "rmse_mean": 4.165656566619873,
+      "rmse_bicubic": 4.305156230926514,
+      "crps": 1.6062365219222836,
+      "spread_skill": 0.44156093586545136,
+      "coverage_50": 0.04475703324808184,
+      "coverage_80": 0.4780610613810742,
+      "coverage_90": 0.7155430786445013
+    },
+    {
+      "date": "2025-02-12",
+      "category": "prism_only",
+      "era5_domain_mean_mm": 0.012602647766470909,
+      "prism_domain_mean_mm": 1.2697067260742188,
+      "metrics_available": true,
+      "rmse_mean": 2.2004432678222656,
+      "rmse_bicubic": 2.3718645572662354,
+      "crps": 0.9507020909373132,
+      "spread_skill": 0.7029697716580448,
+      "coverage_50": 0.10698729219948849,
+      "coverage_80": 0.5158447890025576,
+      "coverage_90": 0.745534287084399
+    },
+    {
+      "date": "2025-02-28",
+      "category": "era5_only",
+      "era5_domain_mean_mm": 0.5662044882774353,
+      "prism_domain_mean_mm": 0.0,
+      "metrics_available": true,
+      "rmse_mean": 1.5966192483901978,
+      "rmse_bicubic": 1.1865158081054688,
+      "crps": 0.5097659361913673,
+      "spread_skill": 1.227292119815812,
+      "coverage_50": 0.007243046675191816,
+      "coverage_80": 0.4280290920716113,
+      "coverage_90": 0.6972106777493606
+    },
+    {
+      "date": "2025-03-11",
+      "category": "era5_only",
+      "era5_domain_mean_mm": 0.17611633241176605,
+      "prism_domain_mean_mm": 0.0,
+      "metrics_available": true,
+      "rmse_mean": 0.7268118858337402,
+      "rmse_bicubic": 0.3702029883861542,
+      "crps": 0.2453478433812112,
+      "spread_skill": 1.554003520633301,
+      "coverage_50": 0.006813459079283888,
+      "coverage_80": 0.4513566975703325,
+      "coverage_90": 0.7555646579283888
+    },
+    {
+      "date": "2025-04-06",
+      "category": "both_rain",
+      "era5_domain_mean_mm": 0.2289184182882309,
+      "prism_domain_mean_mm": 17.204923629760742,
+      "metrics_available": true,
+      "rmse_mean": 25.973752975463867,
+      "rmse_bicubic": 26.231922149658203,
+      "crps": 15.791326998554341,
+      "spread_skill": 0.06183250558933551,
+      "coverage_50": 0.013247282608695652,
+      "coverage_80": 0.22986932544757033,
+      "coverage_90": 0.3651294757033248
+    },
+    {
+      "date": "2025-04-12",
+      "category": "era5_only",
+      "era5_domain_mean_mm": 0.1886531263589859,
+      "prism_domain_mean_mm": 0.05675144121050835,
+      "metrics_available": true,
+      "rmse_mean": 0.8084186315536499,
+      "rmse_bicubic": 0.5106219053268433,
+      "crps": 0.2735207098240838,
+      "spread_skill": 1.5483884906483665,
+      "coverage_50": 0.04182984335038363,
+      "coverage_80": 0.518172554347826,
+      "coverage_90": 0.7917399296675192
+    },
+    {
+      "date": "2025-04-21",
+      "category": "both_rain",
+      "era5_domain_mean_mm": 0.531711220741272,
+      "prism_domain_mean_mm": 18.746055603027344,
+      "metrics_available": true,
+      "rmse_mean": 20.211532592773438,
+      "rmse_bicubic": 20.640701293945312,
+      "crps": 17.565776671871127,
+      "spread_skill": 0.06974168745724618,
+      "coverage_50": 0.01964114450127877,
+      "coverage_80": 0.04176990089514066,
+      "coverage_90": 0.05622602301790281
+    },
+    {
+      "date": "2025-04-26",
+      "category": "both_rain",
+      "era5_domain_mean_mm": 0.8054328560829163,
+      "prism_domain_mean_mm": 5.1295390129089355,
+      "metrics_available": true,
+      "rmse_mean": 7.8374342918396,
+      "rmse_bicubic": 8.030389785766602,
+      "crps": 4.531808885138544,
+      "spread_skill": 0.30952431106437855,
+      "coverage_50": 0.11049392583120204,
+      "coverage_80": 0.280570652173913,
+      "coverage_90": 0.4124240728900256
+    },
+    {
+      "date": "2025-05-08",
+      "category": "prism_only",
+      "era5_domain_mean_mm": 0.009802601300179958,
+      "prism_domain_mean_mm": 1.5360661745071411,
+      "metrics_available": true,
+      "rmse_mean": 3.3022871017456055,
+      "rmse_bicubic": 3.4622559547424316,
+      "crps": 1.2698009141804645,
+      "spread_skill": 0.5355157402967224,
+      "coverage_50": 0.06686580882352941,
+      "coverage_80": 0.46467391304347827,
+      "coverage_90": 0.6896179667519181
+    },
+    {
+      "date": "2025-05-14",
+      "category": "both_rain",
+      "era5_domain_mean_mm": 0.23958322405815125,
+      "prism_domain_mean_mm": 0.5751366019248962,
+      "metrics_available": true,
+      "rmse_mean": 2.8765499591827393,
+      "rmse_bicubic": 2.911973476409912,
+      "crps": 0.9510235737545042,
+      "spread_skill": 0.777573163923419,
+      "coverage_50": 0.07708599744245524,
+      "coverage_80": 0.46820052749360613,
+      "coverage_90": 0.6948929028132992
+    },
+    {
+      "date": "2025-05-27",
+      "category": "prism_only",
+      "era5_domain_mean_mm": 0.038529906421899796,
+      "prism_domain_mean_mm": 0.36934196949005127,
+      "metrics_available": true,
+      "rmse_mean": 0.744414746761322,
+      "rmse_bicubic": 0.7239708304405212,
+      "crps": 0.28398420411514,
+      "spread_skill": 1.5874517172523015,
+      "coverage_50": 0.1081661604859335,
+      "coverage_80": 0.5978560581841432,
+      "coverage_90": 0.8665780850383632
+    },
+    {
+      "date": "2025-06-08",
+      "category": "both_rain",
+      "era5_domain_mean_mm": 0.11531654000282288,
+      "prism_domain_mean_mm": 6.281585216522217,
+      "metrics_available": true,
+      "rmse_mean": 8.6881103515625,
+      "rmse_bicubic": 8.99174976348877,
+      "crps": 5.651272533135801,
+      "spread_skill": 0.1570712183668729,
+      "coverage_50": 0.056265984654731455,
+      "coverage_80": 0.18680067135549872,
+      "coverage_90": 0.2697610294117647
+    },
+    {
+      "date": "2025-06-10",
+      "category": "both_rain",
+      "era5_domain_mean_mm": 0.10960912704467773,
+      "prism_domain_mean_mm": 0.46052858233451843,
+      "metrics_available": true,
+      "rmse_mean": 1.7811485528945923,
+      "rmse_bicubic": 1.7629445791244507,
+      "crps": 0.47700456943167335,
+      "spread_skill": 1.1163506823419975,
+      "coverage_50": 0.0193514226342711,
+      "coverage_80": 0.49107856457800514,
+      "coverage_90": 0.7936480978260869
+    },
+    {
+      "date": "2025-06-23",
+      "category": "era5_only",
+      "era5_domain_mean_mm": 0.7575905919075012,
+      "prism_domain_mean_mm": 0.0,
+      "metrics_available": true,
+      "rmse_mean": 2.0353450775146484,
+      "rmse_bicubic": 1.5574841499328613,
+      "crps": 0.6582738184804797,
+      "spread_skill": 1.1567762353682163,
+      "coverage_50": 0.00479539641943734,
+      "coverage_80": 0.3558284047314578,
+      "coverage_90": 0.6165081521739131
+    },
+    {
+      "date": "2025-06-25",
+      "category": "prism_only",
+      "era5_domain_mean_mm": 0.0034098124597221613,
+      "prism_domain_mean_mm": 3.7181499004364014,
+      "metrics_available": true,
+      "rmse_mean": 7.7895283699035645,
+      "rmse_bicubic": 7.985816478729248,
+      "crps": 3.443053469882788,
+      "spread_skill": 0.2172631692397705,
+      "coverage_50": 0.06510749680306906,
+      "coverage_80": 0.4130135070332481,
+      "coverage_90": 0.6042099584398977
+    },
+    {
+      "date": "2025-06-29",
+      "category": "both_rain",
+      "era5_domain_mean_mm": 0.13120460510253906,
+      "prism_domain_mean_mm": 3.5482025146484375,
+      "metrics_available": true,
+      "rmse_mean": 9.992685317993164,
+      "rmse_bicubic": 10.10486125946045,
+      "crps": 2.8674050655552126,
+      "spread_skill": 0.2844878232469201,
+      "coverage_50": 0.043877877237851665,
+      "coverage_80": 0.4775315696930946,
+      "coverage_90": 0.7286005434782609
+    },
+    {
+      "date": "2025-07-13",
+      "category": "both_rain",
+      "era5_domain_mean_mm": 0.519124448299408,
+      "prism_domain_mean_mm": 2.807978630065918,
+      "metrics_available": true,
+      "rmse_mean": 5.365861415863037,
+      "rmse_bicubic": 5.575104713439941,
+      "crps": 2.230312994923657,
+      "spread_skill": 0.472851625506638,
+      "coverage_50": 0.0836496962915601,
+      "coverage_80": 0.4681605658567775,
+      "coverage_90": 0.6806265984654731
+    },
+    {
+      "date": "2025-08-10",
+      "category": "prism_only",
+      "era5_domain_mean_mm": 0.06114369258284569,
+      "prism_domain_mean_mm": 2.6191940307617188,
+      "metrics_available": true,
+      "rmse_mean": 9.03936767578125,
+      "rmse_bicubic": 9.13504695892334,
+      "crps": 2.341145635106499,
+      "spread_skill": 0.320135000257679,
+      "coverage_50": 0.03909247122762148,
+      "coverage_80": 0.4587595907928389,
+      "coverage_90": 0.7187799712276215
+    },
+    {
+      "date": "2025-08-16",
+      "category": "both_rain",
+      "era5_domain_mean_mm": 0.6274018883705139,
+      "prism_domain_mean_mm": 1.2036796808242798,
+      "metrics_available": true,
+      "rmse_mean": 3.9024341106414795,
+      "rmse_bicubic": 3.8142101764678955,
+      "crps": 1.5442631536786704,
+      "spread_skill": 0.6651078635688772,
+      "coverage_50": 0.0462056425831202,
+      "coverage_80": 0.36598865089514065,
+      "coverage_90": 0.5788143382352942
+    },
+    {
+      "date": "2025-08-23",
+      "category": "prism_only",
+      "era5_domain_mean_mm": 0.04692882299423218,
+      "prism_domain_mean_mm": 0.14609506726264954,
+      "metrics_available": true,
+      "rmse_mean": 0.7700229287147522,
+      "rmse_bicubic": 0.6817240118980408,
+      "crps": 0.2661240182029765,
+      "spread_skill": 1.5208306848576254,
+      "coverage_50": 0.041570092710997444,
+      "coverage_80": 0.5399516464194374,
+      "coverage_90": 0.8369765025575447
+    },
+    {
+      "date": "2025-08-25",
+      "category": "era5_only",
+      "era5_domain_mean_mm": 1.0948864221572876,
+      "prism_domain_mean_mm": 0.0,
+      "metrics_available": true,
+      "rmse_mean": 2.44989013671875,
+      "rmse_bicubic": 1.9171983003616333,
+      "crps": 0.8290288722245446,
+      "spread_skill": 1.0934533135846105,
+      "coverage_50": 0.004735453964194373,
+      "coverage_80": 0.3180546675191816,
+      "coverage_90": 0.5597826086956522
+    },
+    {
+      "date": "2025-08-26",
+      "category": "era5_only",
+      "era5_domain_mean_mm": 1.2803747653961182,
+      "prism_domain_mean_mm": 0.0,
+      "metrics_available": true,
+      "rmse_mean": 2.921506404876709,
+      "rmse_bicubic": 2.2616989612579346,
+      "crps": 1.0387730107020736,
+      "spread_skill": 1.0467839340793461,
+      "coverage_50": 0.003236892583120205,
+      "coverage_80": 0.2740269341432225,
+      "coverage_90": 0.4986313139386189
+    },
+    {
+      "date": "2025-08-27",
+      "category": "era5_only",
+      "era5_domain_mean_mm": 0.5583873391151428,
+      "prism_domain_mean_mm": 0.0,
+      "metrics_available": true,
+      "rmse_mean": 1.52955162525177,
+      "rmse_bicubic": 1.0781219005584717,
+      "crps": 0.5157842414902167,
+      "spread_skill": 1.2693853236801298,
+      "coverage_50": 0.004745444373401534,
+      "coverage_80": 0.3429807384910486,
+      "coverage_90": 0.6073968989769821
+    },
+    {
+      "date": "2025-09-02",
+      "category": "era5_only",
+      "era5_domain_mean_mm": 0.11417750269174576,
+      "prism_domain_mean_mm": 0.05407338589429855,
+      "metrics_available": true,
+      "rmse_mean": 0.64997398853302,
+      "rmse_bicubic": 0.3546256124973297,
+      "crps": 0.2172534849032905,
+      "spread_skill": 1.6299960403054214,
+      "coverage_50": 0.02192894820971867,
+      "coverage_80": 0.5018182544757033,
+      "coverage_90": 0.814727861253197
+    },
+    {
+      "date": "2025-09-10",
+      "category": "era5_only",
+      "era5_domain_mean_mm": 0.12301301211118698,
+      "prism_domain_mean_mm": 0.0017733958084136248,
+      "metrics_available": true,
+      "rmse_mean": 0.662616491317749,
+      "rmse_bicubic": 0.3283593952655792,
+      "crps": 0.20675619209335303,
+      "spread_skill": 1.618397309206941,
+      "coverage_50": 0.013077445652173914,
+      "coverage_80": 0.509920476342711,
+      "coverage_90": 0.8248980978260869
+    },
+    {
+      "date": "2025-09-23",
+      "category": "both_rain",
+      "era5_domain_mean_mm": 0.2596055269241333,
+      "prism_domain_mean_mm": 4.723361968994141,
+      "metrics_available": true,
+      "rmse_mean": 9.221809387207031,
+      "rmse_bicubic": 9.426675796508789,
+      "crps": 4.046382822467478,
+      "spread_skill": 0.22786132031706754,
+      "coverage_50": 0.07534766624040921,
+      "coverage_80": 0.4121343510230179,
+      "coverage_90": 0.6050091911764706
+    },
+    {
+      "date": "2025-10-16",
+      "category": "prism_only",
+      "era5_domain_mean_mm": 0.052606966346502304,
+      "prism_domain_mean_mm": 0.6022925972938538,
+      "metrics_available": true,
+      "rmse_mean": 1.579218864440918,
+      "rmse_bicubic": 1.6395162343978882,
+      "crps": 0.5522378688381748,
+      "spread_skill": 1.0266339990225588,
+      "coverage_50": 0.08654691496163683,
+      "coverage_80": 0.5155450767263428,
+      "coverage_90": 0.7782828484654731
+    },
+    {
+      "date": "2025-10-17",
+      "category": "prism_only",
+      "era5_domain_mean_mm": 4.878129402641207e-05,
+      "prism_domain_mean_mm": 0.12500512599945068,
+      "metrics_available": true,
+      "rmse_mean": 0.5515193939208984,
+      "rmse_bicubic": 0.40923306345939636,
+      "crps": 0.19977198746000283,
+      "spread_skill": 1.6663776799598482,
+      "coverage_50": 0.02973145780051151,
+      "coverage_80": 0.5868466272378516,
+      "coverage_90": 0.8830822410485933
+    }
+  ]
+}
