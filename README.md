@@ -153,8 +153,8 @@ Course project for CS 598 (Generative AI), Spring 2026 — Rishab Sakalkale, Kas
 The work was collaborative without rigidly assigned roles.
 
 **My contributions (Yunxi Zeng):** led the data preprocessing pipeline (ERA5/ERA5-Land/PRISM regridding
-and residual-pair construction, AlphaEarth embedding streaming and pooling), implemented the XGBoost
-baselines, and co-developed the Conditional Flow Matching model and its training.
+and residual-pair construction), implemented the XGBoost
+baselines, and help developed the Conditional Flow Matching model and its training.
 
 <!-- FILL 5: link teammates' GitHub/LinkedIn if they're happy to be tagged, and add the repo URL -->
 
